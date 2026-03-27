@@ -1,0 +1,26 @@
+{
+  "status": "success",
+  "training_time_seconds": 72.32,
+  "timestamp": "2026-03-26T19:27:28.210116",
+  "ae_losses": {
+    "domain": 8.020346800486246,
+    "ip": 0.5179824839540794,
+    "url": 0.416361927986145
+  },
+  "fold_accuracies": [
+    1.0,
+    1.0,
+    0.3333333333333333,
+    1.0,
+    1.0
+  ],
+  "mean_accuracy": 0.8667,
+  "graph_stats": {
+    "domains": 300,
+    "ips": 885,
+    "urls": 71,
+    "events": 31,
+    "labeled_events": 29
+  },
+  "model_path": "/Users/jwang/MASTER_CAPSTONE/trail_gnn/models/gnn_model.pt"
+}

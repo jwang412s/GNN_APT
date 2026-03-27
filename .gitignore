@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+
+# Models (too large for git)
+trail_gnn/models/*.pt
+
+# Neo4j
+*.dump
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Trail paper repo data (large files)
+trail/TKG_data/full_graph_csr.pt
+trail/TKG.zip
+trail/ML_DATA.zip
+trail/TKG_data/otx_dataset/
+
+# Env
+.env
+*.env
+
+# Temp
+/tmp/
