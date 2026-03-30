@@ -1,0 +1,525 @@
+{
+  "name": "Agentic-AI DNS Intelligence Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dnsintel",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -592,
+        144
+      ],
+      "id": "c52eecab-0e3c-407f-ab28-db5fde80bb17",
+      "name": "Webhook",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "url": "=https://www.virustotal.com/api/v3/domains/{{ $json[\"body.domains\"] }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-apikey",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -176,
+        0
+      ],
+      "id": "cd9efe1d-910d-45af-ad64-bb56950e393d",
+      "name": "VirusTotal",
+      "alwaysOutputData": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1232,
+        -32
+      ],
+      "id": "f1ac3dbf-3900-4db2-bdec-e110c7868461",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.whoisfreaks.com/v1.0/whois?apiKey=&whois=live&domainName={{ $json[\"body.domains\"] }}\n",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -256,
+        144
+      ],
+      "id": "9b590d31-896b-4b71-a6df-94bd8e3c947e",
+      "name": "WhoIsFreaks",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://otx.alienvault.com/api/v1/indicators/domain/{{ $json[\"body.domains\"] }}/general",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-OTX-API-KEY",
+              "value": ""
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -256,
+        -144
+      ],
+      "id": "86cc9420-a3ea-4692-b5db-db9151ca164c",
+      "name": "AlienVaultOTX",
+      "alwaysOutputData": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6388bf94-224c-44be-8fc9-f01b53879652",
+              "name": "data",
+              "value": "={{ $json.data }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        80
+      ],
+      "id": "3eceee69-0f79-4c69-ae59-7468a1158295",
+      "name": "Data Schema Lock"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "22506fad-71fa-43ef-855b-e311b5723f3f",
+              "name": "=data",
+              "value": "={{$json}}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -96,
+        -144
+      ],
+      "id": "0beeca3f-d59b-4dc6-bf38-9333557d3342",
+      "name": "AlientValutOTX Data Wrapper"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "22506fad-71fa-43ef-855b-e311b5723f3f",
+              "name": "=data",
+              "value": "={{$json}}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -96,
+        144
+      ],
+      "id": "d7f04058-4e44-4fd6-a572-f28c49d49a20",
+      "name": "WhoIsFreaks Data Wrapper"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body.domains",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        144
+      ],
+      "id": "cc9483d1-c350-4c31-a403-c1c430120e8a",
+      "name": "Split Out",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  \n  let raw = \"\";\n\n  // Gemini stores content inside candidates \u2192 content \u2192 parts \u2192 text\n  const candidates = item.json.candidates || [];\n  for (let i = 0; i < candidates.length; i++) {\n    const parts = (candidates[i].content && candidates[i].content.parts) || [];\n    for (let j = 0; j < parts.length; j++) {\n      if (typeof parts[j].text === \"string\") {\n        raw += parts[j].text + \"\\n\\n\";\n      }\n    }\n  }\n\n  return {\n    json: {\n      report_text: raw.trim()\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        96
+      ],
+      "id": "bd68c758-90de-4d02-be7f-2cbcbcf46f59",
+      "name": "Normalizing"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 3,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        80,
+        96
+      ],
+      "id": "9ff2b45c-46f7-4020-9bb3-630ed9a61c51",
+      "name": "Merging"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Generate a concise, professional DNS threat-intelligence report suitable for a SOC analyst using the structured JSON data below.\n\n{{ JSON.stringify($json.data, null, 2) }}\n\n====================================================\nRULES FOR CALCULATING MALICIOUS SUSPICION PERCENTAGE\n====================================================\n\nYou MUST compute the \"malicious_suspicion_percentage\" using the exact rules below.\n\nNever use VirusTotal\u2019s raw percentage (malicious_engines / total_engines). \nThat number is ONLY for display in text, NOT for scoring.\n\n1. ENGINE VOTE COUNT\n   - malicious_engines = last_analysis_stats.malicious + last_analysis_stats.suspicious\n   - total_engines = sum of all values in last_analysis_stats.\n\n2. WEIGHTING LOGIC (MANDATORY):\n   A. If an actor IS identified (from OTX pulses, actor tags, adversary names, etc.):\n      final_percentage =\n          (actor_weight = 80%)\n        + (llm_reasoning_weight = 20%)\n      - DO NOT use engine votes when an actor exists.\n\n   B. If NO actor is identified\n      engine_weight CAPPED at maximum 50%\n      If the engine is among the well-recognized engines such as BitDefender, Fortinet, Sophos, Kaspersky, ESET, or such: \n        engine_weight = malicious_engines * 6%\n      If not: \n        engine_weight = malicious_engines * 4%\n\n     - Do not classify a domain as malicious or suspicious or give it too much suspicion score solely because it is unregistered or lacks WHOIS data. Only flag a domain if there are additional, independent indicators of malicious or suspicious activity.\n\n      llm_reasoning_weight = between 0% and 30% depending on:\n        - malicious behavior indicators (DGA, C2, Typosquat, Crypto Scam, Phishing patterns)\n        - WHOIS anomalies (hidden data, expired registration, rapid changes)\n        - infrastructure red flags (Cloudflare obfuscation, dynamic DNS, sinkhole behavior)\n        - DNS artifacts (self-pointing MX, no records, NXDOMAIN patterns)\n        - naming entropy (random string, algorithmic patterns)\n\n      final_percentage = engine_weight + llm_reasoning_weight\n\n3. CONSTRAINT:\n   - final_percentage MUST remain between 0 and 100.\n\n4. EXPLAIN the weighting inside the report when appropriate:\n   Example: \u201cAlthough only 4 engines flagged the domain, DGA-like naming and infrastructure anomalies justify a higher suspicion score based on reasoning.\"\n\n===========================================\nREPORT CONTENT REQUIREMENTS\n===========================================\n\nWrite full sentences. Professional tone. \nNO section headers such as \u201cInfrastructure Notes:\u201d unless instructed below.\nUse the following structure:\n\n1. Report body (single narrative text):\n   - State the domain.\n   - State the risk level.\n   - Explain WHY the adjusted percentage is what it is.\n   - Mention engine vote count explicitly: \u201cX out of Y engines.\u201d\n   - Mention behavioral tags.\n   - Mention hosting provider and infrastructure notes.\n   - Mention WHOIS anomalies.\n   - If actor exists, explain attribution.\n   - If actor does NOT exist, explain why attribution is unknown.\n   - Explain why the score might be high even if few engines detect it.\n   - Do not mention the total number of engines that have scanned the name.\n   - Only give Actor name when you are absolutely sure who the actor is and never assume it.\n   - keep the reasoning paragraph separated.\n\n2. At the end of the narrative, ALWAYS include a short \u201cquick reference summary\u201d in plain text:\n\nExample:\nQuick Summary:\nDomain: example.com\nRisk Level: malicious\nSuspicion: 83%\nBehavioral Tags: dga, newly_registered\nInferred Actor: unknown\nEngine Suspicious Vote Count: 4\nEngine Malicious Vote Count: 6\n\n\n===========================================\nOUTPUT FORMAT\n===========================================\n\nOutput ONLY plain text (no JSON, no markdown fences).\n\nThe first line MUST be:\nDNS Intelligence Report \u2014 <domain>\n"
+            },
+            {}
+          ]
+        },
+        "simplify": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        512,
+        128
+      ],
+      "id": "28d38507-ba80-4452-a417-d24bee4b68e1",
+      "name": "LLM Reasoning",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map((item, index) => {\n\n  var fullText = item.json.report_text || \"\";\n\n  var domainRegex = /[a-zA-Z0-9-]+\\.[a-zA-Z0-9.-]+/;\n  var rawMatch = fullText.match(domainRegex);\n  var domain = rawMatch ? rawMatch[0].toLowerCase() : \"report_\" + (index + 1);\n\n  var timestamp = new Date().toLocaleString();\n  var fullTextWithTimestamp = fullText + \"\\n\\nReport Generated On: \" + timestamp;\n\n  var escaped = fullTextWithTimestamp\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\");\n\n  var html =\n    \"<html><head>\" +\n\n    \"<meta http-equiv='Cache-Control' content='no-store, no-cache, must-revalidate, max-age=0'>\" +\n    \"<meta http-equiv='Pragma' content='no-cache'>\" +\n    \"<meta http-equiv='Expires' content='0'>\" +\n\n    \"<meta charset='UTF-8'>\" +\n    \"<title>DNS Intelligence Report \u2014 \" + domain + \"</title>\" +\n    \"<style>\" +\n      \"body{font-family:Arial,sans-serif;margin:0;padding:20px;background:#fafafa;color:#333}\" +\n      \"pre{background:#f0f0f0;padding:15px;border-left:4px solid #0055aa;white-space:pre-wrap}\" +\n      \".back-btn{display:inline-block;margin-top:20px;padding:10px 15px;background:#0055aa;color:white;text-decoration:none;border-radius:5px}\" +\n      \".back-btn:hover{background:#003f7d}\" +\n      \"footer{margin-top:40px;font-size:12px;color:#777;text-align:center}\" +\n    \"</style></head><body>\" +\n\n    \"<h1>DNS Intelligence Report \u2014 \" + domain + \"</h1>\" +\n    \"<pre>\" + escaped + \"</pre>\" +\n\n    \"<a class='back-btn' href='/reports/'>\u2190 Back to Reports</a>\" +\n\n    \"<footer>\" +\n      \"Generated automatically by the Agentic-AI DNS Intelligence Pipeline.\" +\n    \"</footer>\" +\n\n    \"</body></html>\";\n\n  return {\n    json: {},\n    binary: {\n      data: {\n        data: Buffer.from(html).toString(\"base64\"),\n        mimeType: \"text/html\",\n        fileName: domain + \"_report.html\"\n      }\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        64
+      ],
+      "id": "aaa5eb19-3b0b-4d6b-b24b-680b64fefd93",
+      "name": "Convert to HTML"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $binary.data.fileName }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        32
+      ],
+      "id": "efff3659-c647-4d89-ae3f-aef3662095a8",
+      "name": "Write to Disk"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "10a89c76-67a2-42b5-afd6-8f564e71da6c",
+              "leftValue": "={{ $json.data }}",
+              "rightValue": "=No item to return was found",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        368,
+        48
+      ],
+      "id": "e2bb9171-f5a5-4bca-bacb-1bf503dec5cf",
+      "name": "If not Enriched",
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "localhost:5678",
+            "user-agent": "curl/7.81.0",
+            "accept": "*/*",
+            "content-type": "application/json",
+            "content-length": "26"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "domains": [
+              "j2k9s3.xyz"
+            ]
+          },
+          "webhookUrl": "http://localhost:5678/webhook/dnsintel",
+          "executionMode": "production"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal": {
+      "main": [
+        [
+          {
+            "node": "Merging",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "WhoIsFreaks": {
+      "main": [
+        [
+          {
+            "node": "WhoIsFreaks Data Wrapper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AlienVaultOTX": {
+      "main": [
+        [
+          {
+            "node": "AlientValutOTX Data Wrapper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Schema Lock": {
+      "main": [
+        [
+          {
+            "node": "If not Enriched",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AlientValutOTX Data Wrapper": {
+      "main": [
+        [
+          {
+            "node": "Merging",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhoIsFreaks Data Wrapper": {
+      "main": [
+        [
+          {
+            "node": "Merging",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AlienVaultOTX",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "WhoIsFreaks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizing": {
+      "main": [
+        [
+          {
+            "node": "Convert to HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merging": {
+      "main": [
+        [
+          {
+            "node": "Data Schema Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Reasoning": {
+      "main": [
+        [
+          {
+            "node": "Normalizing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to HTML": {
+      "main": [
+        [
+          {
+            "node": "Write to Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to Disk": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If not Enriched": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM Reasoning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

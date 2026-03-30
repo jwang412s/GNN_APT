@@ -1,0 +1,1036 @@
+{
+  "name": "TRAIL_G2_v0",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ea997204-5297-4e74-8ef3-ca217f51b583",
+      "name": "When clicking ‘Execute workflow’",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2336,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "results",
+        "options": {}
+      },
+      "id": "258c23b3-3b9e-41c1-b909-108c3101408b",
+      "name": "Split Pulses",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://otx.alienvault.com/api/v1/pulses/{{ $json.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "5463b2dc-5c53-4d0c-9831-75daf0c7fd97",
+      "name": "Get Pulse Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -896,
+        112
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vCYy1OIYKBWYqykg",
+          "name": "alienvaultapi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the dynamic data from the MITRE parsing node\nconst canonicalTarget = $('Parse MITRE Aliases').first().json.canonical_name;\nconst aptAliases = $('Parse MITRE Aliases').first().json.apt_dictionary;\n\nconst validPulses = [];\n\n// 2. Implement the TRAIL Alias Isolation Logic\nfor (const item of $input.all()) {\n  const pulse = item.json;\n  if (!pulse.indicators) continue;\n\n  const tags = pulse.tags ? pulse.tags.map(t => t.toLowerCase()) : [];\n  let hasConflict = false;\n  \n  // Check the pulse tags against the massive MITRE dictionary\n  for (const [canonical, aliases] of Object.entries(aptAliases)) {\n    // Skip checking aliases for our actual target\n    if (canonical === canonicalTarget) continue; \n    \n    // If the pulse has a tag that matches ANOTHER group's alias, flag it\n    const containsOtherApt = aliases.some(alias => tags.includes(alias));\n    if (containsOtherApt) {\n      hasConflict = true;\n      break; \n    }\n  }\n\n  // Paper Rule: Ignore if it has multiple valid APT aliases as tags\n  if (hasConflict) continue;\n\n  validPulses.push(pulse);\n}\n\n// 3. Implement the TRAIL Threshold Logic (25 events minimum)\nif (validPulses.length < 25) {\n   return []; // Gracefully stops the workflow if not enough clean data exists\n}\n\n// 4. Extract IOCs for Neo4j\nconst allIOCs = [];\nfor(const pulse of validPulses) {\n  const iocs = pulse.indicators\n    .filter(i => i.type === 'domain' || i.type === 'hostname' || i.type === 'IPv4' || i.type === 'URL')\n    .map(i => ({\n       event_id: pulse.id,\n       event_name: pulse.name,\n       apt_label: canonicalTarget, \n       ioc: i.indicator,\n       type: (i.type === 'hostname') ? 'domain' : i.type\n    }));\n  allIOCs.push(...iocs);\n}\n\nreturn allIOCs;"
+      },
+      "id": "d7c184ac-5af7-4826-a340-4c99dc0b1111",
+      "name": "Extract IOCs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "150cbde8-0f03-48d5-b39b-23c82b898dad",
+      "name": "Split in Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "URL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "50f979de-776a-40b6-a835-5a202bf14d0b"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "URLs"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "41c7a22c-a955-40c8-b743-37a0b88a900f",
+      "name": "Router (Type Check)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -240,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://otx.alienvault.com/api/v1/indicators/{{ $json.type === 'IPv4' ? 'IPv4' : 'domain' }}/{{ $json.ioc }}/passive_dns",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "d84892dc-784e-4dfd-af73-6589be5224c2",
+      "name": "OTX: Get Passive DNS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -16,
+        176
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vCYy1OIYKBWYqykg",
+          "name": "alienvaultapi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// TRAIL Logic: Map Relationships correctly\nconst input = $input.all()[0].json;\nconst meta = $('Split in Batches').first().json;\n\nif (!input.passive_dns) return [];\n\nreturn input.passive_dns\n  .filter(record => record.record_type === 'A')\n  .map(record => {\n     let domain, ip;\n     if (meta.type === 'domain') {\n       domain = meta.ioc;\n       ip = record.address;\n     } else {\n       domain = record.hostname;\n       ip = meta.ioc;\n     }\n     return {\n       event_name: meta.event_name, \n       event_id: meta.event_id,\n       apt_label: meta.apt_label,\n       primary_domain: domain,\n       secondary_ip: ip,\n       first_seen: record.first,\n       last_seen: record.last\n     };\n  });"
+      },
+      "id": "2bf7792f-9d9c-4ff1-90ef-b612155d2549",
+      "name": "Format Infra",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simple Formatter for URLs (Direct Pass-through)\nconst meta = $('Split in Batches').first().json;\n\nreturn [{\n  type: 'URL',\n  event_name: meta.event_name,\n  event_id: meta.event_id,\n  apt_label: meta.apt_label,\n  url: meta.ioc\n}];"
+      },
+      "id": "8a3aa725-93c1-49cd-80d1-a713131fd773",
+      "name": "Format URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7474/db/neo4j/tx/commit",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "neo4jApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "statements",
+              "value": "={{ [{\n  \"statement\": \"MERGE (e:Event {id: $event_id}) SET e.apt = $apt_label, e.type = 'Report', e.name = $event_name MERGE (d:Domain {value: $primary_domain}) MERGE (ip:IP {value: $secondary_ip}) MERGE (e)-[:InReport]->(d) MERGE (d)-[r:ResolvesTo]->(ip) SET r.first_seen = $first_seen, r.last_seen = $last_seen\",\n  \"parameters\": {\n    \"event_id\": $json.event_id,\n    \"event_name\": $json.event_name,\n    \"apt_label\": $json.apt_label,\n    \"primary_domain\": $json.primary_domain,\n    \"secondary_ip\": $json.secondary_ip,\n    \"first_seen\": $json.first_seen,\n    \"last_seen\": $json.last_seen\n  }\n}] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "83eb3f62-7907-4a7e-aed4-d0bfe2e03843",
+      "name": "Write Infra",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        496,
+        176
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "xkWGYm3b51EzGCb4",
+          "name": "neo4j"
+        },
+        "neo4jApi": {
+          "id": "2iJSOomgOQ2m8w1V",
+          "name": "Neo4j account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7474/db/neo4j/tx/commit",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "neo4jApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "statements",
+              "value": "={{ [{\n  \"statement\": \"MERGE (e:Event {id: $event_id}) SET e.apt = $apt_label, e.name = $event_name MERGE (u:URL {value: $url}) MERGE (e)-[:InReport]->(u)\",\n  \"parameters\": {\n    \"event_id\": $json.event_id,\n    \"event_name\": $json.event_name,\n    \"apt_label\": $json.apt_label,\n    \"url\": $json.url\n  }\n}] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "11776956-3c66-4901-95e9-8b5ebad3ea13",
+      "name": "Write URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        368,
+        80
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "xkWGYm3b51EzGCb4",
+          "name": "neo4j"
+        },
+        "neo4jApi": {
+          "id": "2iJSOomgOQ2m8w1V",
+          "name": "Neo4j account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "unit": "seconds"
+      },
+      "id": "d4a330f6-e784-4743-97d1-893d07b85786",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        848,
+        176
+      ],
+      "webhookId": "5e9d22bb-24e7-4aaa-aecc-8d4055925d55"
+    },
+    {
+      "parameters": {
+        "public": true,
+        "options": {}
+      },
+      "id": "61174750-d852-4dd4-9823-2b690c07e3dc",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2176,
+        432
+      ],
+      "webhookId": "e1cec5f1-3ac9-4153-b104-dba0c6e72b7a"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "\"You are a Lead Forensic Analyst. When performing attribution, structure your response as a Chain of Evidence starting from the user's input.\n\nStructure your output as follows:\n\nInitial Indicator: Start with the IOC provided by the user.\n\nThe First Hop (Infrastructure): Identify the direct neighbors (IPs or Passive DNS) found in the graph.\n\nThe Community Bridge: Explain how these neighbors belong to a specific community_id generated by the Label Propagation Algorithm.\n\nThe Actor Hop: List the existing threat reports (:Event nodes) that share that same community_id.\n\nFinal Verdict: Conclude with the threat actor attribution based on the majority of KNOWN labels in the cluster. You must explicitly IGNORE any infrastructure that has no linked actor reports. If even a single threat actor is identified, and there are no conflicting threat actors, you must confidently attribute the IOC to that actor. If absolutely zero threat actors are found across all hops, conclude with \"Unknown\"."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -560,
+        432
+      ],
+      "id": "761b670d-7678-417a-9032-9e6485956a06",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "\"Use this tool to trace the forensic 'hops' for Threat Actor Attribution.\n\nProcess:\n\nIdentify the Bridge: Find the direct neighbors (IPs/Domains) of the target IOC via :ResolvesTo or :InReport relationships.\n\nCluster Analysis: Look up the community_id for those neighbors.\n\nAttribution: Retrieve :Event nodes sharing that community_id to identify the threat actor.\n\nOutput Requirement: You MUST structure your response as a chain: [Initial IOC] -> [Infrastructure Hop] -> [Community ID] -> [Matched Actor Reports].\"",
+        "resource": "graphDb",
+        "cypherQuery": "=MATCH (target {value: \"{{ $fromAI('ioc_value', 'The IOC provided by the user') }}\"})\n// Hop 1: Find the IPs\nOPTIONAL MATCH (target)-[:ResolvesTo]-(ip:IP)\n// Hop 2: Look for ANY other Domain sharing that IP that belongs to a historical Threat Report\nOPTIONAL MATCH (ip)-[:ResolvesTo]-(otherDomain:Domain)<-[:InReport]-(e:Event {type: 'Report'})\nRETURN DISTINCT\n  target.value AS start_node,\n  ip.value AS shared_infrastructure_bridge,\n  e.apt AS attributed_actor,\n  e.name AS report_name"
+      },
+      "type": "n8n-nodes-neo4j.neo4jTool",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        672
+      ],
+      "id": "c6a7e4d3-7a5e-42c3-b968-2874183c7190",
+      "name": "ExecuteQuery graphDb in Neo4j",
+      "credentials": {
+        "neo4jApi": {
+          "id": "2iJSOomgOQ2m8w1V",
+          "name": "Neo4j account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -560,
+        672
+      ],
+      "id": "75bed3a5-bdcf-4d3e-b992-c94416d2e37c",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "IdTUulTpJRHV17dd",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://otx.alienvault.com/api/v1/indicators/{{ $json.type === 'IPv4' ? 'IPv4' : 'domain' }}/{{$json.chatInput }}/passive_dns",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "544c038f-3057-4682-96c6-8cac3443a46f",
+      "name": "OTX: Get Passive DNS1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -1456,
+        560
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vCYy1OIYKBWYqykg",
+          "name": "alienvaultapi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:7474/db/neo4j/tx/commit",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "neo4jApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"statements\": [\n    {\n      \"statement\": \"MERGE (e:Event {id: $event_id}) SET e.name = $event_name, e.type = 'Discovery' MERGE (d:Domain {value: $primary_domain}) MERGE (ip:IP {value: $secondary_ip}) MERGE (e)-[:InReport]->(d) MERGE (d)-[r:ResolvesTo]->(ip) SET r.first_seen = $first_seen, r.last_seen = $last_seen\",\n      \"parameters\": {\n        \"event_id\": $json.event_id,\n        \"event_name\": $json.event_name,\n        \"primary_domain\": $json.primary_domain,\n        \"secondary_ip\": $json.secondary_ip,\n        \"first_seen\": $json.first_seen,\n        \"last_seen\": $json.last_seen\n      }\n    }\n  ]\n} }}",
+        "options": {}
+      },
+      "id": "b9620c2b-78e7-43cd-9526-c1af79a29e31",
+      "name": "Write Infra1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -896,
+        544
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "xkWGYm3b51EzGCb4",
+          "name": "neo4j"
+        },
+        "neo4jApi": {
+          "id": "2iJSOomgOQ2m8w1V",
+          "name": "Neo4j account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.chatInput }}",
+                    "rightValue": "^h[tx]{2}ps?:\\/\\/.*",
+                    "operator": {
+                      "type": "string",
+                      "operation": "regex"
+                    },
+                    "id": "50f979de-776a-40b6-a835-5a202bf14d0b"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "URL"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "1d935a82-d1eb-404e-8e74-f2c8bff05a72",
+      "name": "Router (Type Check)1",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -1776,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://otx.alienvault.com/api/v1/indicators/{{ $json.type === 'IPv4' ? 'IPv4' : 'domain' }}/{{$json.domain}}/passive_dns",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "a6aa57d2-ebb6-4fa1-8c53-359d804210a1",
+      "name": "OTX: Get Passive DNS2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -1232,
+        336
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vCYy1OIYKBWYqykg",
+          "name": "alienvaultapi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=The primary analyst found no graph signal for the IOC: {{ $('When chat message received').first().json.chatInput }}. Here is their report: {{ $json.output }}. Please use your external tools to enrich this IOC and provide an attribution verdict.",
+        "options": {
+          "systemMessage": "\"You are an OSINT Specialist. You take over when local graph data is insufficient for attribution. Your job is to use external enrichment tools to find the 'missing link.'\n\nYour Reasoning Protocol:\n\nExternal Enrichment: Use the VirusTotal and WhoisFreaks tools to analyze the IOC.\n\nPattern Matching: Look for malicious engine detections, malware family names (e.g., Fancy Bear, Cobalt Strike), and registrant email patterns.\n\nRe-Bridge: If external data provides new IP addresses, ask yourself if these IPs might be the bridge to our local graph.\n\nReasoned Attribution: Combine the external reputation with registrant patterns to provide a potential attribution.\n\nFinal Output: Present a detailed summary of the external evidence and provide a 'Likely Attribution' based on the OSINT indicators found.\""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        128,
+        432
+      ],
+      "id": "e75904fc-a7c9-4a66-ade4-36bb65901526",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        48,
+        672
+      ],
+      "id": "3e194edc-6a49-4c08-ad91-e2d07d4479a5",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "IdTUulTpJRHV17dd",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool to fetch reputation data and malicious engine detections from VirusTotal. You MUST determine if the input is a domain or an IP address so the tool can route to the correct endpoint. Ensure the indicator_value is plain text without brackets",
+        "url": "=https://www.virustotal.com/api/v3/{{ $fromAI('indicator_type', 'Must be exactly \"domains\" or \"ip_addresses\"') }}/{{ $fromAI('indicator_value', 'The raw domain or IP. Must be clean text, no quotes or b-prefixes.') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-apikey",
+              "value": "96f973c8affb70e651df805bdc4abcb3a2d9d33847f2332d10a4296a24739e0d"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        336,
+        704
+      ],
+      "id": "0131fe97-db6b-44a1-9063-4e4b443687c7",
+      "name": "VirusTotal1"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool to fetch WHOIS registrant data (email, organization, creation date) for a domain. This helps identify threat actor patterns when graph relationships are missing.\n\nThe API key for you to use is: 67f273a2c80e488eb469faeced0450f6",
+        "url": "=https://api.whoisfreaks.com/v1.0/whois?apiKey=67f273a2c80e488eb469faeced0450f6&whois=live&domainName={{ $fromAI('domain', 'The domain name to check') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        240,
+        704
+      ],
+      "id": "eb64b155-c703-4f4c-91d1-7039e4d4e2e4",
+      "name": "WhoisFreaks"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.output}}",
+                    "rightValue": "Unknown",
+                    "operator": {
+                      "type": "string",
+                      "operation": "contains"
+                    },
+                    "id": "50f979de-776a-40b6-a835-5a202bf14d0b"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "failed"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "64139394-29f2-4cb8-a3fd-b3158c3d4d02",
+      "name": "Router (Type Check)2",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -176,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the raw input\nconst rawUrl = $json.chatInput;\n\n// 2. Remove the protocol (handle both http and hxxp)\nconst noProtocol = rawUrl.replace(/^h[tx]{2}ps?:\\/\\//i, '');\n\n// 3. Extract just the domain (everything before the first '/')\nconst domain = noProtocol.split('/')[0];\n\n// 4. Return the cleaned domain\nreturn {\n  domain: domain,\n  type: 'domain'\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1456,
+        336
+      ],
+      "id": "d0a78e60-5418-4411-b39c-0c0c5094f4a7",
+      "name": "extract domain from url"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the raw enrichment data from the OTX node\nconst input = $input.all()[0].json;\n\n// 2. Identify the target IOC from the Chat Trigger instead of Batching\nconst targetIOC = $('When chat message received').first().json.chatInput;\n\nif (!input.passive_dns) return [];\n\n// 3. Prepare the data for Neo4j\nreturn input.passive_dns\n  // Only keep 'A' records AND filter out dead NXDOMAINs\n  .filter(record => record.record_type === 'A' && record.address !== 'NXDOMAIN')\n  .map(record => {\n     return {\n       // Create a generic Discovery event for the new IOC\n       event_name: \"AI Agent Discovery: \" + targetIOC,\n       event_id: \"discovery-\" + targetIOC,\n       apt_label: \"Pending Attribution\", \n       primary_domain: targetIOC,\n       secondary_ip: record.address,\n       first_seen: record.first,\n       last_seen: record.last\n     };\n  });"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1056,
+        544
+      ],
+      "id": "9af34ccd-eb38-4899-832f-01875ebaa844",
+      "name": "format"
+    },
+    {
+      "parameters": {
+        "url": "=https://otx.alienvault.com/api/v1/search/pulses?q={{ $('Parse MITRE Aliases').first().json.canonical_name }}&sort=-modified&limit=50",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body.next }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.next }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50
+            }
+          }
+        }
+      },
+      "id": "1533a43b-330b-48ff-a4c6-2f32c38e7a18",
+      "name": "Search OTX for threat tag",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -1328,
+        112
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vCYy1OIYKBWYqykg",
+          "name": "alienvaultapi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json",
+        "options": {
+          "response": {
+            "response": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2032,
+        112
+      ],
+      "id": "69060c62-d3e6-46b2-8ed5-ec5953d17ec0",
+      "name": "Fetch Mitre Att&ck"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ==========================================\n// 1. TYPE YOUR TARGET APT RIGHT HERE!\n// ==========================================\nconst TARGET_APT = \"APT29\"; \n\n// 2. Get the raw input from the HTTP node\nlet rawInput = $input.first().json;\nlet mitreData;\n\n// 3. Force n8n to parse GitHub's plain text as a JSON object\nif (rawInput.data && typeof rawInput.data === 'string') {\n  mitreData = JSON.parse(rawInput.data);\n} else if (rawInput.data && typeof rawInput.data === 'object') {\n  mitreData = rawInput.data;\n} else {\n  mitreData = rawInput;\n}\n\n// Safety check for the MITRE data\nif (!mitreData.objects) {\n  throw new Error(\"MITRE data is missing! The JSON parsing failed.\");\n}\n\nconst userInput = TARGET_APT.toLowerCase();\nconst aptAliases = {};\nlet canonicalTarget = TARGET_APT; \n\n// 4. Filter the massive JSON for Threat Actors (Intrusion Sets)\nconst intrusionSets = mitreData.objects.filter(obj => obj.type === 'intrusion-set');\n\n// 5. Build the dynamic dictionary\nfor (const group of intrusionSets) {\n  const canonicalName = group.name;\n  let aliases = group.aliases || [];\n  \n  // Add the official name to the alias list so it matches itself\n  aliases.push(canonicalName); \n  const lowerAliases = aliases.map(a => a.toLowerCase());\n  \n  aptAliases[canonicalName] = lowerAliases;\n  \n  // Check if the user's input matches ANY alias in this group\n  if (lowerAliases.includes(userInput)) {\n    canonicalTarget = canonicalName;\n  }\n}\n\n// 6. Output the official name and the full dictionary\nreturn {\n  canonical_name: canonicalTarget,\n  apt_dictionary: aptAliases\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1696,
+        112
+      ],
+      "id": "aa985435-a6d0-411a-9f2b-9e6e1d1190eb",
+      "name": "Parse MITRE Aliases"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -752,
+        432
+      ],
+      "id": "8bab1f3c-06ea-4c16-88c3-54c9e04fbf19",
+      "name": "Wait1",
+      "webhookId": "ce26cf0d-854c-4277-980c-8989803c0ace"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Fetch Mitre Att&ck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Pulses": {
+      "main": [
+        [
+          {
+            "node": "Get Pulse Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pulse Details": {
+      "main": [
+        [
+          {
+            "node": "Extract IOCs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract IOCs": {
+      "main": [
+        [
+          {
+            "node": "Split in Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split in Batches": {
+      "main": [
+        [
+          {
+            "node": "Router (Type Check)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Router (Type Check)": {
+      "main": [
+        [
+          {
+            "node": "Format URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OTX: Get Passive DNS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OTX: Get Passive DNS": {
+      "main": [
+        [
+          {
+            "node": "Format Infra",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Infra": {
+      "main": [
+        [
+          {
+            "node": "Write Infra",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format URL": {
+      "main": [
+        [
+          {
+            "node": "Write URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Infra": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write URL": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Split in Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Router (Type Check)1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ExecuteQuery graphDb in Neo4j": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OTX: Get Passive DNS1": {
+      "main": [
+        [
+          {
+            "node": "format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Infra1": {
+      "main": [
+        []
+      ]
+    },
+    "Router (Type Check)1": {
+      "main": [
+        [
+          {
+            "node": "extract domain from url",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OTX: Get Passive DNS1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OTX: Get Passive DNS2": {
+      "main": [
+        [
+          {
+            "node": "format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Router (Type Check)2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal1": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhoisFreaks": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Router (Type Check)2": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extract domain from url": {
+      "main": [
+        [
+          {
+            "node": "OTX: Get Passive DNS2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "format": {
+      "main": [
+        [
+          {
+            "node": "Write Infra1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search OTX for threat tag": {
+      "main": [
+        [
+          {
+            "node": "Split Pulses",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Mitre Att&ck": {
+      "main": [
+        [
+          {
+            "node": "Parse MITRE Aliases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse MITRE Aliases": {
+      "main": [
+        [
+          {
+            "node": "Search OTX for threat tag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1ca5ed05-8590-4cd5-8eaf-0742938ff7b3",
+  "meta": {
+    "instanceId": "68a0e16da835581a6980baa51708142c0cb450d4cf2bd1f7df5320c65d90743c"
+  },
+  "id": "9bSuiG8YUefH23vt",
+  "tags": []
+}
