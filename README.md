@@ -165,18 +165,57 @@ roughly 4–5 hours on CPU.
 
 ---
 
-## 3. Serve Single-IOC Attribution
+## 3. Serve Single-IOC Attribution (Paper-Trained GNN)
 
-`predict_paper_server.py` is a FastAPI service that loads a trained
-checkpoint plus the cached paper graph and exposes two endpoints:
+`predict_paper_server.py` is a FastAPI service that loads the
+TRAIL paper's pre-trained 2-layer GraphSAGE checkpoint along with the
+paper's full TKG, and exposes two endpoints:
 
 - `POST /predict_event` — predict on an event already in the graph
   (sanity check; no enrichment).
 - `POST /attribute` — take one or more raw IOCs, enrich them, splice
-  them into the graph as a temporary event, run the 5-fold ensemble,
-  and return the tiered Dempster–Shafer prediction.
+  them into the graph as a temporary event, run inference, and return
+  the tiered Dempster–Shafer prediction.
 
-Start the server:
+### Default Model
+
+The server loads the paper's pre-trained 2-layer GraphSAGE checkpoint
+from the cloned TRAIL repository — specifically the best-fold
+checkpoint (validation balanced accuracy $0.777$):
+
+```
+trail/src/weights/2-layer/gnn_train-0.777_max_lprop+feats+ae-new-data.pt
+```
+
+The graph it serves predictions over is the paper's full TKG:
+
+```
+trail/TKG_data/otx_dataset/full_graph_csr.pt
+```
+
+Both paths are hardcoded near the top of `predict_paper_server.py`
+(`WEIGHTS_PATH` and `GRAPH_PATH`). To serve a different checkpoint —
+for example a model trained by `train_gnn_hierarchical.py` on the
+2023–2026 corpus, or one of the year-drop ensemble checkpoints in
+`sandbox/year_drop/{A,B,C,D}/weights/` — edit those two constants.
+
+### Prerequisites
+
+The default model requires the cloned TRAIL paper repository to be
+present at `./trail/` with its `src/`, `TKG_data/otx_dataset/`, and
+`src/weights/2-layer/` subdirectories populated. The TRAIL repo and
+its dataset are not committed to this repository (they are large and
+mirrored from the original authors); clone them in alongside this
+repo before starting the server:
+
+```bash
+git clone https://github.com/HewlettPackard/TRAIL.git trail
+# then download TKG.zip and the 2-layer weights as documented in
+# the TRAIL repo README and unpack into trail/TKG_data/ and
+# trail/src/weights/ respectively.
+```
+
+### Start
 
 ```bash
 python3 -m uvicorn predict_paper_server:app --host 0.0.0.0 --port 47823
@@ -242,8 +281,31 @@ python3 -u train_gnn_hierarchical.py \
     --name hier_7apt \
     --apts 'Kimsuky,APT28,Mustang Panda,Turla,APT37,APT29,APT41'
 
-# 3. Serve
+# 3. Serve attribution (uses the paper's pre-trained 2-layer GNN by
+#    default — see Section 3 above to swap in your own checkpoint)
 python3 -m uvicorn predict_paper_server:app --host 0.0.0.0 --port 47823
+```
+
+## Quickstart: Attribute an IOC with the Paper-Trained GNN
+
+If you only want to query the pre-trained model from the TRAIL paper
+without retraining anything:
+
+```bash
+# 1. Clone the TRAIL paper repo and its dataset/weights into ./trail
+git clone https://github.com/HewlettPackard/TRAIL.git trail
+# (then download TKG.zip + 2-layer weights as the TRAIL README describes)
+
+# 2. Install dependencies
+pip install -r trail_gnn/requirements.txt
+
+# 3. Start the server
+python3 -m uvicorn predict_paper_server:app --host 0.0.0.0 --port 47823
+
+# 4. Attribute an IOC
+curl -X POST http://localhost:47823/attribute \
+  -H "Content-Type: application/json" \
+  -d '{"iocs": [{"type": "domain", "value": "suspicious.example.com"}]}'
 ```
 
 ---
