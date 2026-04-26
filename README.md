@@ -199,6 +199,30 @@ for example a model trained by `train_gnn_hierarchical.py` on the
 2023–2026 corpus, or one of the year-drop ensemble checkpoints in
 `sandbox/year_drop/{A,B,C,D}/weights/` — edit those two constants.
 
+### Using Your Own Re-Trained Checkpoint
+
+By default the server loads the paper authors' pre-trained checkpoint —
+**not** anything trained by `train_gnn_hierarchical.py` in this repo.
+To serve our re-trained TRAIL baseline (the year-drop config-A run,
+which uses the full corpus with no events dropped), point `WEIGHTS_PATH`
+at one of the 5 fold checkpoints:
+
+```python
+# predict_paper_server.py, near the top
+WEIGHTS_PATH = os.path.join(
+    "sandbox", "year_drop", "A", "weights", "fold0.pt",
+)
+```
+
+`GRAPH_PATH` stays the same — config A was trained on the same paper
+TKG (`trail/TKG_data/otx_dataset/full_graph_csr.pt`).
+
+For a proper paper-comparable evaluation, ensemble all 5 folds by
+averaging softmax outputs across `fold0.pt`–`fold4.pt`. See
+`sandbox/year_drop/infer_neo4j.py` (`get_fold_paths` + the averaging
+loop) for the reference pattern; porting it into the FastAPI handler
+is a one-function change.
+
 ### Prerequisites
 
 The default model requires the cloned TRAIL paper repository to be
