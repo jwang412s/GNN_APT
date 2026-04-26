@@ -127,9 +127,16 @@ def train_pipeline(
     k_folds: int = config.K_FOLDS,
     ae_epochs: int = config.AE_EPOCHS,
     gnn_epochs: int = config.GNN_EPOCHS,
+    model_dir: str | None = None,
 ) -> dict:
     """
     Run the full TRAIL training pipeline.
+
+    `model_dir`: directory to write all artifacts (autoencoders, GNN model,
+    vocabularies, training_results.json). If None, defaults to
+    `config.MODEL_DIR` (the shared top-level models/ dir) — matching the
+    previous behavior. Pass a per-run subpath like
+    `os.path.join(config.MODEL_DIR, "post_enrichment_v1")` to isolate runs.
 
     Returns a dict with training metrics and model paths.
     """
@@ -139,11 +146,16 @@ def train_pipeline(
         client = Neo4jClient()
         own_client = True
 
+    # Resolve output dir once. All saves below must use this, never config.MODEL_DIR
+    # directly — otherwise per-run isolation leaks.
+    out_dir = model_dir or config.MODEL_DIR
+    os.makedirs(out_dir, exist_ok=True)
+
     try:
         # ----- Step 1: Build vocabularies -----
         print("[1/6] Building vocabularies from graph data...")
         vocabs = VocabularySet.build_from_graph(client)
-        vocabs.save()
+        vocabs.save(path=os.path.join(out_dir, "vocabularies.json"))
 
         # ----- Step 2: Export graph -----
         print("[2/6] Exporting graph from Neo4j...")
@@ -162,7 +174,7 @@ def train_pipeline(
         )
         print(f"  AE losses — Domain: {ae_losses['domain']:.6f}, "
               f"IP: {ae_losses['ip']:.6f}, URL: {ae_losses['url']:.6f}")
-        ae_set.save()
+        ae_set.save(directory=out_dir)
 
         # ----- Step 4: Replace features with AE encodings -----
         print("[4/6] Encoding features with autoencoders...")
@@ -216,8 +228,7 @@ def train_pipeline(
                     best_model_state = model_state
 
         # Save best model
-        os.makedirs(config.MODEL_DIR, exist_ok=True)
-        model_path = os.path.join(config.MODEL_DIR, "gnn_model.pt")
+        model_path = os.path.join(out_dir, "gnn_model.pt")
         if best_model_state:
             torch.save(best_model_state, model_path)
 
@@ -240,7 +251,7 @@ def train_pipeline(
         }
 
         # Save training results to disk
-        log_path = os.path.join(config.MODEL_DIR, "training_results.json")
+        log_path = os.path.join(out_dir, "training_results.json")
         try:
             with open(log_path, "w") as f:
                 json.dump(result, f, indent=2)

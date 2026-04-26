@@ -10,7 +10,8 @@ venv/
 node_modules/
 
 # Models (too large for git)
-trail_gnn/models/*.pt
+*.pt
+*.npz
 
 # Neo4j
 *.dump
@@ -23,12 +24,33 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+.claude/
 
 # Trail paper repo data (large files)
-trail/TKG_data/full_graph_csr.pt
+trail/TKG_data/
 trail/TKG.zip
 trail/ML_DATA.zip
-trail/TKG_data/otx_dataset/
+trail/model_weights/
+trail_original/
+
+# Heavy local-only directories
+logs/
+extras/
+htmlstuff/
+archive/
+
+# Per-experiment model artifacts (each dir is ~70MB)
+trail_gnn/models/*/
+
+# Sandbox per-config artifacts (weights + predictions)
+sandbox/year_drop/*/weights/
+sandbox/year_drop/*/predictions/
+sandbox/year_drop/*/*.npz
+sandbox/year_drop/*.json
+
+# OTX collector state
+archive/old_pipeline/*checkpoint*.json
+**/otx_checkpoint*.json
 
 # Env
 .env

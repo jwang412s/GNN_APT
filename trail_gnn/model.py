@@ -29,9 +29,13 @@ class HomogeneousGNN(nn.Module):
         self,
         in_channels: int,
         hidden_channels: int = config.GNN_HIDDEN_DIM,
-        out_channels: int = config.NUM_CLASSES,
+        out_channels: int | None = None,
         num_layers: int = config.GNN_LAYERS,
     ):
+        # Resolve out_channels at instantiation (not def time) so runtime
+        # overrides via config.set_apt_groups(...) are honored.
+        if out_channels is None:
+            out_channels = config.NUM_CLASSES
         super().__init__()
         self.convs = nn.ModuleList()
         self.norms = nn.ModuleList()

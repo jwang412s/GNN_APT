@@ -1,8 +1,13 @@
 """
 Export the Neo4j TRAIL knowledge graph to PyTorch Geometric HeteroData.
 
-Node types: Domain, IP, URL, Event
+Node types: Domain, IP, URL, Event, ASN
 Edge types: InReport, ResolvesTo, InGroup, HostedOn
+
+ASN nodes carry a fixed zero-vector feature at the GNN encoding dim.
+Paper §IV-C treats ASNs as structural-only nodes whose value is the
+4-hop path Event → IP → ASN → IP → Event they enable for message
+passing / label propagation.
 """
 
 import numpy as np
@@ -49,12 +54,16 @@ def export_graph(client: Neo4jClient, vocabs: VocabularySet) -> HeteroData:
         "e.activity_cluster AS activity_cluster "
         "ORDER BY e.id"
     )
+    asns = client.run_query(
+        "MATCH (a:ASN) RETURN a.number AS id ORDER BY a.number"
+    )
 
     # Build ID → index mappings
     domain_id2idx = {d["id"]: i for i, d in enumerate(domains)}
     ip_id2idx = {ip["id"]: i for i, ip in enumerate(ips)}
     url_id2idx = {u["id"]: i for i, u in enumerate(urls)}
     event_id2idx = {e["id"]: i for i, e in enumerate(events)}
+    asn_id2idx = {a["id"]: i for i, a in enumerate(asns)}
 
     # --- Fetch temporal data from edges and attach to node props ---
     now = datetime.utcnow()
@@ -171,6 +180,19 @@ def export_graph(client: Neo4jClient, vocabs: VocabularySet) -> HeteroData:
     else:
         data["url"].x = torch.zeros((0, config.URL_FEATURE_DIM))
 
+    # ASN nodes are structural-only. Features are a zero vector at the
+    # AE encoding dim so heterogeneous message passing sees the same
+    # shape as post-AE Domain/IP/URL features. The GNN still learns
+    # weights on the in_group / rev_in_group relations, which is the
+    # whole point of including ASN nodes.
+    num_asns = len(asns)
+    if num_asns > 0:
+        data["asn"].x = torch.zeros((num_asns, config.ASN_FEATURE_DIM),
+                                    dtype=torch.float32)
+    else:
+        data["asn"].x = torch.zeros((0, config.ASN_FEATURE_DIM),
+                                    dtype=torch.float32)
+
     # Event nodes: placeholder features (will be set after AE encoding)
     # Store labels for training
     num_events = len(events)
@@ -241,7 +263,14 @@ def export_graph(client: Neo4jClient, vocabs: VocabularySet) -> HeteroData:
     _add_edges(data, u_ip, "uid", "ipid", url_id2idx, ip_id2idx,
                ("url", "resolves_to_ip", "ip"))
 
-    # IP -[InGroup]-> ASN  (skip if no ASN nodes — use IP features directly)
+    # IP -[InGroup]-> ASN  (paper §IV-C — enables 4-hop Event→IP→ASN→IP→Event path)
+    if num_asns > 0:
+        ip_asn = client.run_query(
+            "MATCH (ip:IP)-[:InGroup]->(a:ASN) "
+            "RETURN ip.value AS ipid, a.number AS aid"
+        )
+        _add_edges(data, ip_asn, "ipid", "aid", ip_id2idx, asn_id2idx,
+                   ("ip", "in_group", "asn"))
 
     # Add reverse edges for message passing (GNN needs bidirectional)
     _add_reverse_edges(data)
@@ -251,6 +280,7 @@ def export_graph(client: Neo4jClient, vocabs: VocabularySet) -> HeteroData:
     data.ip_id2idx = ip_id2idx
     data.url_id2idx = url_id2idx
     data.event_id2idx = event_id2idx
+    data.asn_id2idx = asn_id2idx
 
     return data
 

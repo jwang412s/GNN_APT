@@ -1,26 +1,23 @@
 {
   "status": "success",
-  "training_time_seconds": 72.32,
-  "timestamp": "2026-03-26T19:27:28.210116",
+  "training_time_seconds": 1035.52,
+  "timestamp": "2026-04-20T00:05:07.991429",
   "ae_losses": {
-    "domain": 8.020346800486246,
-    "ip": 0.5179824839540794,
-    "url": 0.416361927986145
+    "domain": 2.0757433751469145,
+    "ip": 0.5629447429937546,
+    "url": 0.05676100073246267
   },
   "fold_accuracies": [
-    1.0,
-    1.0,
-    0.3333333333333333,
-    1.0,
-    1.0
+    0.2652284263959391,
+    0.22588832487309646
   ],
-  "mean_accuracy": 0.8667,
+  "mean_accuracy": 0.2456,
   "graph_stats": {
-    "domains": 300,
-    "ips": 885,
-    "urls": 71,
-    "events": 31,
-    "labeled_events": 29
+    "domains": 231215,
+    "ips": 66023,
+    "urls": 12108,
+    "events": 1740,
+    "labeled_events": 1576
   },
   "model_path": "/Users/jwang/MASTER_CAPSTONE/trail_gnn/models/gnn_model.pt"
 }
