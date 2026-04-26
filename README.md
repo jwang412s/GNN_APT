@@ -179,58 +179,55 @@ paper's full TKG, and exposes two endpoints:
 
 ### Default Model
 
-The server loads the paper's pre-trained 2-layer GraphSAGE checkpoint
-from the cloned TRAIL repository — specifically the best-fold
-checkpoint (validation balanced accuracy $0.777$):
+The server **loads our re-trained 5-fold GraphSAGE ensemble** (year-drop
+config B, which uses the paper's full TKG minus 2018-dated events) and
+averages softmax outputs across the 5 folds:
+
+```
+sandbox/year_drop/B/weights/fold{0..4}.pt
+```
+
+The graph it serves predictions over is the timestamped variant of the
+paper's TKG (the same one used at training time):
+
+```
+trail/TKG_data/otx_dataset_timestamped/full_graph_csr.pt
+```
+
+Both paths are set near the top of `predict_paper_server.py`
+(`WEIGHTS_PATHS` and `GRAPH_PATH`).
+
+### Falling Back to the Paper's Original Checkpoint
+
+To serve the paper authors' single pre-trained checkpoint (best fold,
+validation balanced accuracy $0.777$) instead of our re-trained
+ensemble, set the environment variable before launching:
+
+```bash
+USE_PAPER_BASELINE=1 python3 -m uvicorn predict_paper_server:app \
+    --host 0.0.0.0 --port 47823
+```
+
+That branch points the server at:
 
 ```
 trail/src/weights/2-layer/gnn_train-0.777_max_lprop+feats+ae-new-data.pt
-```
-
-The graph it serves predictions over is the paper's full TKG:
-
-```
 trail/TKG_data/otx_dataset/full_graph_csr.pt
 ```
 
-Both paths are hardcoded near the top of `predict_paper_server.py`
-(`WEIGHTS_PATH` and `GRAPH_PATH`). To serve a different checkpoint —
-for example a model trained by `train_gnn_hierarchical.py` on the
-2023–2026 corpus, or one of the year-drop ensemble checkpoints in
-`sandbox/year_drop/{A,B,C,D}/weights/` — edit those two constants.
-
-### Using Your Own Re-Trained Checkpoint
-
-By default the server loads the paper authors' pre-trained checkpoint —
-**not** anything trained by `train_gnn_hierarchical.py` in this repo.
-To serve our re-trained TRAIL baseline (the year-drop config-A run,
-which uses the full corpus with no events dropped), point `WEIGHTS_PATH`
-at one of the 5 fold checkpoints:
-
-```python
-# predict_paper_server.py, near the top
-WEIGHTS_PATH = os.path.join(
-    "sandbox", "year_drop", "A", "weights", "fold0.pt",
-)
-```
-
-`GRAPH_PATH` stays the same — config A was trained on the same paper
-TKG (`trail/TKG_data/otx_dataset/full_graph_csr.pt`).
-
-For a proper paper-comparable evaluation, ensemble all 5 folds by
-averaging softmax outputs across `fold0.pt`–`fold4.pt`. See
-`sandbox/year_drop/infer_neo4j.py` (`get_fold_paths` + the averaging
-loop) for the reference pattern; porting it into the FastAPI handler
-is a one-function change.
+To serve a different checkpoint entirely (e.g. one of the year-drop
+config C/D ensembles in `sandbox/year_drop/{C,D}/weights/`), edit the
+`WEIGHTS_PATHS` list in `predict_paper_server.py` directly.
 
 ### Prerequisites
 
 The default model requires the cloned TRAIL paper repository to be
-present at `./trail/` with its `src/`, `TKG_data/otx_dataset/`, and
-`src/weights/2-layer/` subdirectories populated. The TRAIL repo and
-its dataset are not committed to this repository (they are large and
-mirrored from the original authors); clone them in alongside this
-repo before starting the server:
+present at `./trail/` with its `src/` and
+`TKG_data/otx_dataset_timestamped/` subdirectories populated, plus our
+re-trained fold checkpoints in `sandbox/year_drop/B/weights/`. The
+TRAIL repo and its dataset are not committed to this repository (they
+are large and mirrored from the original authors); clone them in
+alongside this repo before starting the server:
 
 ```bash
 git clone https://github.com/HewlettPackard/TRAIL.git trail

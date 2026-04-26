@@ -58,12 +58,26 @@ from models.gnn import SageClassifier  # noqa: E402
 from feature_extraction import domain as fdomain  # noqa: E402
 from feature_extraction import url as furl  # noqa: E402
 
-DATA_DIR = os.path.join("trail", "TKG_data", "otx_dataset")
-GRAPH_PATH = os.path.join(DATA_DIR, "full_graph_csr.pt")
-WEIGHTS_PATH = os.path.join(
-    "trail", "src", "weights", "2-layer",
-    "gnn_train-0.777_max_lprop+feats+ae-new-data.pt",  # best fold (val b-acc=0.777)
-)
+# Default: our re-trained 5-fold ensemble (year-drop config B — full paper
+# corpus minus 2018 events) over the timestamped TKG variant. Set
+# USE_PAPER_BASELINE=1 to fall back to the paper authors' single-fold
+# checkpoint over the original (un-timestamped) TKG.
+USE_PAPER_BASELINE = os.environ.get("USE_PAPER_BASELINE", "0") == "1"
+
+if USE_PAPER_BASELINE:
+    DATA_DIR = os.path.join("trail", "TKG_data", "otx_dataset")
+    GRAPH_PATH = os.path.join(DATA_DIR, "full_graph_csr.pt")
+    WEIGHTS_PATHS = [
+        os.path.join(
+            "trail", "src", "weights", "2-layer",
+            "gnn_train-0.777_max_lprop+feats+ae-new-data.pt",
+        ),
+    ]
+else:
+    DATA_DIR = os.path.join("trail", "TKG_data", "otx_dataset_timestamped")
+    GRAPH_PATH = os.path.join(DATA_DIR, "full_graph_csr.pt")
+    _WDIR = os.path.join("sandbox", "year_drop", "B", "weights")
+    WEIGHTS_PATHS = [os.path.join(_WDIR, f"fold{i}.pt") for i in range(5)]
 
 # APT -> nation-state attribution (public consensus)
 APT_TO_NATION = {
@@ -186,20 +200,31 @@ def load_everything():
     g = torch.load(GRAPH_PATH, weights_only=False)
     print(f"        events={g.event_ids.size(0)}  nodes={g.x.size(0)}  classes={int(g.y.max())+1}")
 
-    print(f"[load] checkpoint: {WEIGHTS_PATH}")
-    sd, args, kwargs = torch.load(WEIGHTS_PATH, weights_only=False)
+    models = []
+    for wp in WEIGHTS_PATHS:
+        if not os.path.exists(wp):
+            print(f"  [skip] missing checkpoint: {wp}")
+            continue
+        print(f"[load] checkpoint: {wp}")
+        sd, args, kwargs = torch.load(wp, weights_only=False)
+        # The model's data_dir is path-relative-to-`models/`. Use absolute.
+        args = (os.path.abspath(DATA_DIR),) + args[1:]
+        kwargs = dict(kwargs)
+        kwargs["class_weights"] = None
+        sd.pop("criterion.weight", None)
+        m = SageClassifier(*args, **kwargs)
+        missing, unexpected = m.load_state_dict(sd, strict=False)
+        if unexpected:
+            print(f"  [warn] unexpected keys: {unexpected[:5]}{'...' if len(unexpected)>5 else ''}")
+        m.eval()
+        models.append(m)
+    if not models:
+        raise RuntimeError(f"no checkpoints loaded; tried {WEIGHTS_PATHS}")
+    print(f"[load] loaded {len(models)} model(s) for ensemble")
 
-    # The model's data_dir is path-relative-to-`models/`. We use absolute path.
-    args = (os.path.abspath(DATA_DIR),) + args[1:]
-    kwargs.pop("class_weights", None)  # skip — not needed for inference
-    model = SageClassifier(*args, **kwargs)
-    # state_dict was saved with class_weights in CrossEntropyLoss; ignore the missing
-    missing, unexpected = model.load_state_dict(sd, strict=False)
-    if unexpected:
-        print(f"  [warn] unexpected keys: {unexpected[:5]}{'...' if len(unexpected)>5 else ''}")
-    model.eval()
-
-    # FeatureSampler/Autoencoder loaded the CSVs; grab references for mutation
+    # FeatureSampler/Autoencoder loaded the CSVs; grab references from the
+    # first model (all folds share the same DATA_DIR / CSVs).
+    model = models[0]
     fs = model.net.feature_sampler
     print(f"        domains={len(fs.domains)}  ips={len(fs.ips)}  urls={len(fs.urls)}")
 
@@ -224,9 +249,21 @@ def load_everything():
     label_map = dict(g.label_map)
     label_map_inv = {v: k for k, v in label_map.items()}
 
-    return {"g": g, "model": model, "fs": fs,
+    return {"g": g, "model": model, "models": models, "fs": fs,
             "name_to_nid": name_to_nid,
             "label_map": label_map, "label_map_inv": label_map_inv}
+
+
+def ensemble_softmax(node_ids: torch.Tensor) -> torch.Tensor:
+    """Average softmax across all loaded fold models. Returns [N, C]."""
+    g = state["g"]; models = state["models"]
+    accum = None
+    for m in models:
+        with torch.no_grad():
+            logits = m.inference(g, node_ids)
+            sm = logits.softmax(dim=1)
+        accum = sm if accum is None else accum + sm
+    return accum / len(models)
 
 
 # ------------------------------------------------------------------ #
@@ -361,15 +398,13 @@ class PredictEventReq(BaseModel):
 
 @app.post("/predict_event")
 def predict_event(req: PredictEventReq):
-    g = state["g"]; model = state["model"]; lm = state["label_map"]
+    g = state["g"]; lm = state["label_map"]
     if not (0 <= req.event_id < g.x.size(0)):
         raise HTTPException(400, f"event_id out of range")
     if g.x[req.event_id].item() != g.type_dict["EVENT"]:
         raise HTTPException(400, f"node {req.event_id} is not an EVENT node")
 
-    with torch.no_grad():
-        logits = model.inference(g, torch.tensor([req.event_id]))
-        probs = logits.softmax(dim=1)[0]
+    probs = ensemble_softmax(torch.tensor([req.event_id]))[0]
 
     scores = {lm[i]: float(probs[i]) for i in range(probs.size(0))}
     top = max(scores.items(), key=lambda kv: kv[1])
@@ -425,10 +460,8 @@ def attribute(req: AttributeReq):
 
     temp_event_nid = add_temp_event(ioc_node_ids)
 
-    g = state["g"]; model = state["model"]; lm = state["label_map"]
-    with torch.no_grad():
-        logits = model.inference(g, torch.tensor([temp_event_nid]))
-        probs = logits.softmax(dim=1)[0]
+    g = state["g"]; lm = state["label_map"]
+    probs = ensemble_softmax(torch.tensor([temp_event_nid]))[0]
 
     scores = {lm[i]: float(probs[i]) for i in range(probs.size(0))}
     top = max(scores.items(), key=lambda kv: kv[1])
@@ -456,5 +489,7 @@ def status():
         "graph_nodes": int(g.x.size(0)),
         "events": int(g.event_ids.size(0)),
         "classes": list(state["label_map"].values()),
-        "weights": WEIGHTS_PATH,
+        "weights": WEIGHTS_PATHS,
+        "ensemble_size": len(state.get("models", [])),
+        "graph": GRAPH_PATH,
     }
