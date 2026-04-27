@@ -253,32 +253,6 @@ If you prefer to set up by hand, the server needs:
 The server validates all four at startup and prints a precise
 fix-it message for anything missing — no silent crashes.
 
-### Shipping the Project to Someone Else
-
-Use `./make_release.sh`. It bundles everything a recipient needs to
-hit `/attribute` — the project code, TRAIL paper source, the
-timestamped TKG, our 5 fold checkpoints, and the paper-baseline
-checkpoints — into a single ~270 MB zip. Caches, venvs, redundant
-archives (`TKG.zip`, `ML_DATA.zip`), the untimestamped TKG variant,
-unused weight directories, and other year-drop configs are excluded.
-
-```bash
-./make_release.sh
-# → ../MASTER_CAPSTONE_release.zip  (~270 MB)
-```
-
-The recipient does:
-
-```bash
-unzip MASTER_CAPSTONE_release.zip
-cd MASTER_CAPSTONE
-./setup.sh                      # creates venv, installs deps, validates
-source .venv/bin/activate
-python3 -m uvicorn predict_paper_server:app --host 0.0.0.0 --port 47823
-```
-
-That's it — no manual TKG download, no `git clone`, no API keys, no
-Neo4j. They just need Python 3.12 and a working `pip`.
 
 ### Start
 
