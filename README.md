@@ -219,23 +219,24 @@ To serve a different checkpoint entirely (e.g. one of the year-drop
 config C/D ensembles in `sandbox/year_drop/{C,D}/weights/`), edit the
 `WEIGHTS_PATHS` list in `predict_paper_server.py` directly.
 
-### Prerequisites — One-Shot Setup
-
-The fastest path on a fresh machine: run `./setup.sh` from the project
-root. It clones the TRAIL paper repo if missing, walks you through
-fetching the TKG dataset, verifies our fold checkpoints, creates a
-Python venv, installs dependencies, and prints the launch command. Re-
-running it is safe.
+### One-Shot Setup on a Fresh Machine
 
 ```bash
-chmod +x setup.sh
+git clone https://github.com/jwang412s/GNN_APT.git
+cd GNN_APT
 ./setup.sh
+source .venv/bin/activate
+python3 -m uvicorn predict_paper_server:app --host 0.0.0.0 --port 47823
 ```
 
-**What `setup.sh` cannot do for you:** the TRAIL authors host
-`TKG.zip` out-of-band, so you'll need to download it yourself the
-first time and unpack it into `trail/TKG_data/`. The script will tell
-you exactly when it needs that and stop until it's there.
+`setup.sh` clones the TRAIL paper source, fetches the timestamped TKG
+and our 5 fold checkpoints from this repo's GitHub Release
+(`assets-v1`), grabs the paper authors' baseline weights too, creates a
+`.venv`, and installs Python deps. ~180 MB total download. Re-running
+is safe — every step is idempotent.
+
+The only prerequisites on the recipient's machine are **Python 3.12**
+and either `curl` or `wget` (both standard on macOS / Linux).
 
 If you prefer to set up by hand, the server needs:
 
@@ -252,6 +253,18 @@ If you prefer to set up by hand, the server needs:
 
 The server validates all four at startup and prints a precise
 fix-it message for anything missing — no silent crashes.
+
+### Republishing the Binary Assets
+
+If you re-train the model or refresh the TKG, re-upload them with:
+
+```bash
+./prepare_release_assets.sh   # requires gh CLI authenticated to your repo
+```
+
+This re-tars the timestamped TKG and the 2-layer paper weights, and
+uploads them plus the 5 fold checkpoints to the `assets-v1` release on
+`jwang412s/GNN_APT` (uses `--clobber` so it's safe to re-run).
 
 
 ### Start

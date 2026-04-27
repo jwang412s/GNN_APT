@@ -4,10 +4,12 @@
 # What this does:
 #   1. Resolves ./trail (handles dangling symlink from a zip transfer)
 #   2. Clones the TRAIL paper repo if missing
-#   3. Downloads + unpacks the TKG dataset and paper weights if missing
-#   4. Verifies our re-trained fold checkpoints are present
-#   5. Creates .venv and installs Python dependencies
-#   6. Prints the exact command to start the server
+#   3. Fetches the timestamped TKG from this repo's GitHub Release if missing
+#   4. Fetches our 5 fold checkpoints from the same release if missing
+#   5. Fetches the paper authors' baseline weights from the release if missing
+#      (only needed for USE_PAPER_BASELINE=1)
+#   6. Creates .venv and installs Python dependencies
+#   7. Prints the exact command to start the server
 #
 # Usage:
 #   chmod +x setup.sh
@@ -20,7 +22,22 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-echo "[1/6] Checking ./trail layout"
+ASSETS_BASE="https://github.com/jwang412s/GNN_APT/releases/download/assets-v1"
+
+# fetch <url> <output>
+fetch() {
+  local url="$1" out="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -L --fail --progress-bar -o "$out" "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget --show-progress -O "$out" "$url"
+  else
+    echo "  need curl or wget on PATH to fetch $url" >&2
+    exit 1
+  fi
+}
+
+echo "[1/7] Checking ./trail layout"
 if [ -L trail ] && [ ! -e trail ]; then
   echo "  ./trail is a dangling symlink — removing"
   rm trail
@@ -34,66 +51,62 @@ if [ -L trail ]; then
   fi
 fi
 
-echo "[2/6] Cloning TRAIL paper repo if missing"
+echo "[2/7] Cloning TRAIL paper repo if missing"
 if [ ! -d trail ]; then
   git clone https://github.com/HewlettPackard/TRAIL.git trail
 else
   echo "  ./trail already present — skipping clone"
 fi
 
-echo "[3/6] TKG dataset"
+echo "[3/7] TKG dataset"
 TKG_TS="trail/TKG_data/otx_dataset_timestamped/full_graph_csr.pt"
 TKG_ORIG="trail/TKG_data/otx_dataset/full_graph_csr.pt"
 if [ ! -f "$TKG_TS" ] && [ ! -f "$TKG_ORIG" ]; then
-  cat <<EOF
-  TKG data not found.
-
-  If you got this folder as the official release zip, the TKG should
-  already be inside trail/TKG_data/ — something is wrong with the zip.
-
-  If you cloned this repo from GitHub instead, the TKG is hosted out-
-  of-band by the TRAIL paper authors. See trail/README.md for the
-  current download link, then unpack TKG.zip into trail/TKG_data/ so
-  that one of these files exists:
-
-    $TKG_TS         (preferred — needed for the default ensemble)
-    $TKG_ORIG       (only needed for USE_PAPER_BASELINE=1)
-
-  Re-run ./setup.sh once that's done.
-EOF
-  exit 1
+  echo "  fetching tkg_timestamped.tar.gz from GitHub Release..."
+  mkdir -p trail/TKG_data
+  fetch "$ASSETS_BASE/tkg_timestamped.tar.gz" /tmp/tkg_timestamped.tar.gz
+  tar -xzf /tmp/tkg_timestamped.tar.gz -C trail/TKG_data
+  rm -f /tmp/tkg_timestamped.tar.gz
+  if [ ! -f "$TKG_TS" ]; then
+    echo "  download succeeded but $TKG_TS still missing — bailing"
+    exit 1
+  fi
+  echo "  TKG installed"
 else
   echo "  TKG present"
 fi
 
-echo "[4/6] Model checkpoints"
+echo "[4/7] Re-trained fold checkpoints"
 WDIR="sandbox/year_drop/B/weights"
-MISSING=0
+mkdir -p "$WDIR"
+MISSING=()
 for i in 0 1 2 3 4; do
   if [ ! -f "$WDIR/fold${i}.pt" ]; then
-    echo "  missing: $WDIR/fold${i}.pt"
-    MISSING=1
+    MISSING+=("fold${i}.pt")
   fi
 done
-if [ "$MISSING" -eq 1 ]; then
-  cat <<EOF
+if [ ${#MISSING[@]} -gt 0 ]; then
+  echo "  fetching ${#MISSING[@]} fold checkpoint(s) from GitHub Release..."
+  for f in "${MISSING[@]}"; do
+    fetch "$ASSETS_BASE/$f" "$WDIR/$f"
+  done
+fi
+echo "  fold0..fold4 present"
 
-  Re-trained fold checkpoints are missing from $WDIR.
-
-  Options:
-    (a) Ask whoever shipped you this folder for the fold0..fold4.pt files
-        and drop them into $WDIR/.
-    (b) Run the paper authors' single-fold checkpoint instead — set
-        USE_PAPER_BASELINE=1 when starting the server, and make sure
-        trail/src/weights/2-layer/gnn_train-0.777_max_lprop+feats+ae-new-data.pt
-        exists.
-EOF
-  exit 1
+echo "[5/7] Paper baseline weights (for USE_PAPER_BASELINE=1)"
+PAPER_WT="trail/src/weights/2-layer/gnn_train-0.777_max_lprop+feats+ae-new-data.pt"
+if [ ! -f "$PAPER_WT" ]; then
+  echo "  fetching paper_baseline.tar.gz from GitHub Release..."
+  mkdir -p trail/src/weights
+  fetch "$ASSETS_BASE/paper_baseline.tar.gz" /tmp/paper_baseline.tar.gz
+  tar -xzf /tmp/paper_baseline.tar.gz -C trail/src/weights
+  rm -f /tmp/paper_baseline.tar.gz
+  echo "  paper baseline weights installed"
 else
-  echo "  fold0..fold4 present"
+  echo "  paper baseline weights present"
 fi
 
-echo "[5/6] Python venv + dependencies"
+echo "[6/7] Python venv + dependencies"
 if [ ! -d .venv ]; then
   python3 -m venv .venv
 fi
@@ -102,7 +115,7 @@ source .venv/bin/activate
 pip install --quiet --upgrade pip
 pip install --quiet -r trail_gnn/requirements.txt
 
-echo "[6/6] Done."
+echo "[7/7] Done."
 cat <<'EOF'
 
 To start the server:
@@ -113,4 +126,8 @@ Test /attribute once "[ready] server up." appears:
   curl -X POST http://localhost:47823/attribute \
        -H "Content-Type: application/json" \
        -d '{"iocs": [{"type":"domain","value":"suspicious.example.com"}]}'
+
+Switch to the paper authors' single-fold checkpoint:
+  USE_PAPER_BASELINE=1 python3 -m uvicorn predict_paper_server:app \
+       --host 0.0.0.0 --port 47823
 EOF
