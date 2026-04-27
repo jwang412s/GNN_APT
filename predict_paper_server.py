@@ -59,17 +59,23 @@ TRAIL_DIR = os.environ.get("TRAIL_DIR", os.path.join(ROOT, "trail"))
 TRAIL_SRC = os.path.join(TRAIL_DIR, "src")
 sys.path.insert(0, TRAIL_SRC)
 
-# Default: our re-trained 5-fold ensemble (year-drop config B — full paper
-# corpus minus 2018 events) over the timestamped TKG variant. Set
-# USE_PAPER_BASELINE=1 to fall back to the paper authors' single-fold
-# checkpoint over the original (un-timestamped) TKG.
+# Both inference modes run over the timestamped TKG (same graph structure
+# the paper baseline was trained on, plus timestamp annotations the model
+# ignores). This means USE_PAPER_BASELINE=1 works without needing to ship
+# the second 680MB un-timestamped graph. The same pattern used in
+# sandbox/year_drop/infer_neo4j.py.
 USE_PAPER_BASELINE = os.environ.get("USE_PAPER_BASELINE", "0") == "1"
 
+# Try the timestamped TKG first; if it isn't there but the original is, use
+# that. Either works for both inference modes.
+_DATA_TS = os.path.join(TRAIL_DIR, "TKG_data", "otx_dataset_timestamped")
+_DATA_ORIG = os.path.join(TRAIL_DIR, "TKG_data", "otx_dataset")
+DATA_DIR = _DATA_TS if os.path.isdir(_DATA_TS) else _DATA_ORIG
+GRAPH_PATH = os.environ.get(
+    "GRAPH_PATH", os.path.join(DATA_DIR, "full_graph_csr.pt")
+)
+
 if USE_PAPER_BASELINE:
-    DATA_DIR = os.path.join(TRAIL_DIR, "TKG_data", "otx_dataset")
-    GRAPH_PATH = os.environ.get(
-        "GRAPH_PATH", os.path.join(DATA_DIR, "full_graph_csr.pt")
-    )
     WEIGHTS_DIR = os.environ.get(
         "WEIGHTS_DIR", os.path.join(TRAIL_DIR, "src", "weights", "2-layer")
     )
@@ -77,10 +83,6 @@ if USE_PAPER_BASELINE:
         WEIGHTS_DIR, "gnn_train-0.777_max_lprop+feats+ae-new-data.pt",
     )]
 else:
-    DATA_DIR = os.path.join(TRAIL_DIR, "TKG_data", "otx_dataset_timestamped")
-    GRAPH_PATH = os.environ.get(
-        "GRAPH_PATH", os.path.join(DATA_DIR, "full_graph_csr.pt")
-    )
     WEIGHTS_DIR = os.environ.get(
         "WEIGHTS_DIR", os.path.join(ROOT, "sandbox", "year_drop", "B", "weights")
     )
