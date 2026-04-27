@@ -254,6 +254,34 @@ If you prefer to set up by hand, the server needs:
 The server validates all four at startup and prints a precise
 fix-it message for anything missing — no silent crashes.
 
+### Backup: Running from `release.zip` (Offline / Air-Gapped)
+
+If `git clone` won't work — corporate proxy blocks GitHub, no internet
+on the target machine, or the GitHub Release ever goes away — there's
+a self-contained zip that bundles the same files `setup.sh` would
+otherwise fetch. Build it on a machine that already has everything:
+
+```bash
+./make_release.sh
+# → ../MASTER_CAPSTONE_release.zip  (~270 MB)
+```
+
+Hand that zip to the recipient. They do:
+
+```bash
+unzip MASTER_CAPSTONE_release.zip
+cd MASTER_CAPSTONE
+./setup.sh
+source .venv/bin/activate
+python3 -m uvicorn predict_paper_server:app --host 0.0.0.0 --port 47823
+```
+
+`setup.sh` notices the TKG, fold weights, and paper baseline are
+already on disk, skips the download steps, and goes straight to
+creating `.venv` and installing Python dependencies. The recipient
+still needs `pip` to reach PyPI for the Python deps — if even that's
+unavailable, see `trail_gnn/requirements.txt` and pre-stage the wheels.
+
 ### Republishing the Binary Assets
 
 If you re-train the model or refresh the TKG, re-upload them with:
