@@ -219,22 +219,59 @@ To serve a different checkpoint entirely (e.g. one of the year-drop
 config C/D ensembles in `sandbox/year_drop/{C,D}/weights/`), edit the
 `WEIGHTS_PATHS` list in `predict_paper_server.py` directly.
 
-### Prerequisites
+### Prerequisites — One-Shot Setup
 
-The default model requires the cloned TRAIL paper repository to be
-present at `./trail/` with its `src/` and
-`TKG_data/otx_dataset_timestamped/` subdirectories populated, plus our
-re-trained fold checkpoints in `sandbox/year_drop/B/weights/`. The
-TRAIL repo and its dataset are not committed to this repository (they
-are large and mirrored from the original authors); clone them in
-alongside this repo before starting the server:
+The fastest path on a fresh machine: run `./setup.sh` from the project
+root. It clones the TRAIL paper repo if missing, walks you through
+fetching the TKG dataset, verifies our fold checkpoints, creates a
+Python venv, installs dependencies, and prints the launch command. Re-
+running it is safe.
 
 ```bash
-git clone https://github.com/HewlettPackard/TRAIL.git trail
-# then download TKG.zip and the 2-layer weights as documented in
-# the TRAIL repo README and unpack into trail/TKG_data/ and
-# trail/src/weights/ respectively.
+chmod +x setup.sh
+./setup.sh
 ```
+
+**What `setup.sh` cannot do for you:** the TRAIL authors host
+`TKG.zip` out-of-band, so you'll need to download it yourself the
+first time and unpack it into `trail/TKG_data/`. The script will tell
+you exactly when it needs that and stop until it's there.
+
+If you prefer to set up by hand, the server needs:
+
+1. The TRAIL repo cloned to `./trail/` (or any path; set `TRAIL_DIR`).
+2. The timestamped TKG at
+   `trail/TKG_data/otx_dataset_timestamped/full_graph_csr.pt` (or set
+   `GRAPH_PATH`).
+3. Our 5 fold checkpoints in `sandbox/year_drop/B/weights/fold{0..4}.pt`
+   (or set `WEIGHTS_DIR`, or set `USE_PAPER_BASELINE=1` to use the
+   paper authors' single-fold checkpoint at
+   `trail/src/weights/2-layer/gnn_train-0.777_max_lprop+feats+ae-new-data.pt`
+   instead).
+4. Python 3.12 and `pip install -r trail_gnn/requirements.txt`.
+
+The server validates all four at startup and prints a precise
+fix-it message for anything missing — no silent crashes.
+
+### Shipping the Project to Someone Else
+
+If you're handing this off as a zip rather than a git clone:
+
+```bash
+# Replace the trail symlink with a real directory first
+rm trail && mv trail_original trail   # if applicable
+
+# Then zip, excluding venv / caches / large redundant archives
+cd ..
+zip -r capstone.zip MASTER_CAPSTONE \
+    -x '*/.venv/*' '*/__pycache__/*' '*/.git/*' \
+       '*/trail/TKG.zip' '*/trail/ML_DATA.zip' '*.DS_Store'
+```
+
+The recipient unzips, runs `./setup.sh`, and is one `uvicorn` command
+away from a working `/attribute` endpoint. They do **not** need
+Neo4j or an OTX API key for inference — those are only needed for
+re-collecting data and re-training.
 
 ### Start
 

@@ -50,13 +50,14 @@ import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-# Make the paper's `models` and `feature_extraction` packages importable
-TRAIL_SRC = os.path.join(os.path.dirname(__file__), "trail", "src")
-sys.path.insert(0, TRAIL_SRC)
+# All paths are anchored to this script's directory so the server runs the
+# same regardless of the caller's CWD. Override individual paths with env
+# vars (TRAIL_DIR, GRAPH_PATH, WEIGHTS_DIR) if your layout differs.
+ROOT = os.path.dirname(os.path.abspath(__file__))
 
-from models.gnn import SageClassifier  # noqa: E402
-from feature_extraction import domain as fdomain  # noqa: E402
-from feature_extraction import url as furl  # noqa: E402
+TRAIL_DIR = os.environ.get("TRAIL_DIR", os.path.join(ROOT, "trail"))
+TRAIL_SRC = os.path.join(TRAIL_DIR, "src")
+sys.path.insert(0, TRAIL_SRC)
 
 # Default: our re-trained 5-fold ensemble (year-drop config B — full paper
 # corpus minus 2018 events) over the timestamped TKG variant. Set
@@ -65,19 +66,67 @@ from feature_extraction import url as furl  # noqa: E402
 USE_PAPER_BASELINE = os.environ.get("USE_PAPER_BASELINE", "0") == "1"
 
 if USE_PAPER_BASELINE:
-    DATA_DIR = os.path.join("trail", "TKG_data", "otx_dataset")
-    GRAPH_PATH = os.path.join(DATA_DIR, "full_graph_csr.pt")
-    WEIGHTS_PATHS = [
-        os.path.join(
-            "trail", "src", "weights", "2-layer",
-            "gnn_train-0.777_max_lprop+feats+ae-new-data.pt",
-        ),
-    ]
+    DATA_DIR = os.path.join(TRAIL_DIR, "TKG_data", "otx_dataset")
+    GRAPH_PATH = os.environ.get(
+        "GRAPH_PATH", os.path.join(DATA_DIR, "full_graph_csr.pt")
+    )
+    WEIGHTS_DIR = os.environ.get(
+        "WEIGHTS_DIR", os.path.join(TRAIL_DIR, "src", "weights", "2-layer")
+    )
+    WEIGHTS_PATHS = [os.path.join(
+        WEIGHTS_DIR, "gnn_train-0.777_max_lprop+feats+ae-new-data.pt",
+    )]
 else:
-    DATA_DIR = os.path.join("trail", "TKG_data", "otx_dataset_timestamped")
-    GRAPH_PATH = os.path.join(DATA_DIR, "full_graph_csr.pt")
-    _WDIR = os.path.join("sandbox", "year_drop", "B", "weights")
-    WEIGHTS_PATHS = [os.path.join(_WDIR, f"fold{i}.pt") for i in range(5)]
+    DATA_DIR = os.path.join(TRAIL_DIR, "TKG_data", "otx_dataset_timestamped")
+    GRAPH_PATH = os.environ.get(
+        "GRAPH_PATH", os.path.join(DATA_DIR, "full_graph_csr.pt")
+    )
+    WEIGHTS_DIR = os.environ.get(
+        "WEIGHTS_DIR", os.path.join(ROOT, "sandbox", "year_drop", "B", "weights")
+    )
+    WEIGHTS_PATHS = [os.path.join(WEIGHTS_DIR, f"fold{i}.pt") for i in range(5)]
+
+
+def _preflight() -> None:
+    """Fail fast at import time with a precise, actionable message."""
+    problems = []
+    if not os.path.isdir(TRAIL_SRC):
+        problems.append(
+            f"  - TRAIL source not found at {TRAIL_SRC}\n"
+            f"    Fix: clone https://github.com/HewlettPackard/TRAIL into\n"
+            f"    {TRAIL_DIR}, or set TRAIL_DIR=<path> in your environment.\n"
+            f"    Or run ./setup.sh from the project root."
+        )
+    if not os.path.exists(GRAPH_PATH):
+        problems.append(
+            f"  - TKG graph not found at {GRAPH_PATH}\n"
+            f"    Fix: download TKG.zip from the TRAIL repo README and unpack\n"
+            f"    into {os.path.dirname(GRAPH_PATH)}/, or set GRAPH_PATH=<path>.\n"
+            f"    Or run ./setup.sh."
+        )
+    missing_w = [p for p in WEIGHTS_PATHS if not os.path.exists(p)]
+    if missing_w and len(missing_w) == len(WEIGHTS_PATHS):
+        problems.append(
+            f"  - No model checkpoints found in {WEIGHTS_DIR}\n"
+            f"    Expected: " + ", ".join(os.path.basename(p) for p in WEIGHTS_PATHS) + "\n"
+            f"    Fix: place fold0.pt..fold4.pt in {WEIGHTS_DIR},\n"
+            f"    set WEIGHTS_DIR=<path>, or set USE_PAPER_BASELINE=1 to use the\n"
+            f"    paper authors' single-fold checkpoint instead."
+        )
+    if problems:
+        sys.stderr.write(
+            "\n[predict_paper_server] cannot start — missing required files:\n\n"
+            + "\n\n".join(problems)
+            + "\n\nSee README.md → 'Serve Single-IOC Attribution' for setup.\n\n"
+        )
+        raise SystemExit(2)
+
+
+_preflight()
+
+from models.gnn import SageClassifier  # noqa: E402
+from feature_extraction import domain as fdomain  # noqa: E402
+from feature_extraction import url as furl  # noqa: E402
 
 # APT -> nation-state attribution (public consensus)
 APT_TO_NATION = {
