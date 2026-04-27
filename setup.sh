@@ -48,12 +48,16 @@ if [ ! -f "$TKG_TS" ] && [ ! -f "$TKG_ORIG" ]; then
   cat <<EOF
   TKG data not found.
 
-  The TRAIL authors host TKG.zip out-of-band — see the instructions in
-  trail/README.md for the current download link, then unpack it into
-  trail/TKG_data/ so that one of these files exists:
+  If you got this folder as the official release zip, the TKG should
+  already be inside trail/TKG_data/ — something is wrong with the zip.
 
-    $TKG_TS         (preferred — needed for our re-trained ensemble)
-    $TKG_ORIG       (needed only for USE_PAPER_BASELINE=1)
+  If you cloned this repo from GitHub instead, the TKG is hosted out-
+  of-band by the TRAIL paper authors. See trail/README.md for the
+  current download link, then unpack TKG.zip into trail/TKG_data/ so
+  that one of these files exists:
+
+    $TKG_TS         (preferred — needed for the default ensemble)
+    $TKG_ORIG       (only needed for USE_PAPER_BASELINE=1)
 
   Re-run ./setup.sh once that's done.
 EOF

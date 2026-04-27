@@ -255,23 +255,30 @@ fix-it message for anything missing — no silent crashes.
 
 ### Shipping the Project to Someone Else
 
-If you're handing this off as a zip rather than a git clone:
+Use `./make_release.sh`. It bundles everything a recipient needs to
+hit `/attribute` — the project code, TRAIL paper source, the
+timestamped TKG, our 5 fold checkpoints, and the paper-baseline
+checkpoints — into a single ~270 MB zip. Caches, venvs, redundant
+archives (`TKG.zip`, `ML_DATA.zip`), the untimestamped TKG variant,
+unused weight directories, and other year-drop configs are excluded.
 
 ```bash
-# Replace the trail symlink with a real directory first
-rm trail && mv trail_original trail   # if applicable
-
-# Then zip, excluding venv / caches / large redundant archives
-cd ..
-zip -r capstone.zip MASTER_CAPSTONE \
-    -x '*/.venv/*' '*/__pycache__/*' '*/.git/*' \
-       '*/trail/TKG.zip' '*/trail/ML_DATA.zip' '*.DS_Store'
+./make_release.sh
+# → ../MASTER_CAPSTONE_release.zip  (~270 MB)
 ```
 
-The recipient unzips, runs `./setup.sh`, and is one `uvicorn` command
-away from a working `/attribute` endpoint. They do **not** need
-Neo4j or an OTX API key for inference — those are only needed for
-re-collecting data and re-training.
+The recipient does:
+
+```bash
+unzip MASTER_CAPSTONE_release.zip
+cd MASTER_CAPSTONE
+./setup.sh                      # creates venv, installs deps, validates
+source .venv/bin/activate
+python3 -m uvicorn predict_paper_server:app --host 0.0.0.0 --port 47823
+```
+
+That's it — no manual TKG download, no `git clone`, no API keys, no
+Neo4j. They just need Python 3.12 and a working `pip`.
 
 ### Start
 
